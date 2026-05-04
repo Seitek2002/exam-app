@@ -54,120 +54,72 @@ const SeismoIsolationCalculator: React.FC = () => {
   // --- Вычисления (Memoized) ---
   const results = useMemo(() => {
     const soil = SOIL_TYPES[soilIndex];
-    const g = 9.81; // м/с²
-    // const ag = ag_ratio * g; // Расчетное ускорение
+    const g = 9.81;
 
-    // 1. Эффективная жесткость системы (Приложение В, Этап 1)
-    // K(eff total) = 4 * pi^2 * M / T^2
-    const K_eff_total = (4 * Math.pow(Math.PI, 2) * mass) / Math.pow(T_eff, 2);
+    const xi = damping / 100;
 
-    // 2. Жесткость одной опоры (Приложение В, Этап 2)
-    // K(eff) = K(eff total) / n
+    // 1. Keff total
+    const K_eff_total = (4 * Math.PI * Math.PI * mass) / (T_eff * T_eff);
+
+    // 2. Keff
     const K_eff = K_eff_total / isolatorCount;
 
-    // 3. Коэффициент демпфирования η (eta) (Формулы 7.10-7.14, Этап 5)
-    // Используем упрощенную формулу (7.10) для T=3c
-    const xi_fraction = damping / 100;
-    const eta = Math.sqrt(10 / (5 + damping));
+    // 3. η (правильная формула)
+    const rho = 1 + (0.05 - xi) / (0.05 + 2 * xi - 3 * xi * xi);
 
-    // 4. Спектр упругих реакций Se(T) (Этап 3, Формула 7.9 для T > Tc)
-    // Se(T) = ag * S * η * 2.5 * (Tc / T)
-    // Примечание: В примере B2.4 используется T=3.0, Tc=0.64. Мы используем формулу динамически.
-    let Se_T = 0;
+    const lambda = (0.05 - xi) / (0.33 + 9 * xi);
+
+    const eta = rho * Math.pow(1 / T_eff, lambda);
+
+    // 4. Se(T) при 5% (η = 1)
+    let Se_5 = 0;
+
     if (T_eff >= soil.TC) {
-      Se_T = ag_ratio * g * soil.S_factor * 2.5 * eta * (soil.TC / T_eff);
+      Se_5 = ag_ratio * g * soil.S_factor * 2.5 * (soil.TC / T_eff);
     } else if (T_eff >= soil.TB) {
-      Se_T = ag_ratio * g * soil.S_factor * 2.5 * eta;
+      Se_5 = ag_ratio * g * soil.S_factor * 2.5;
     } else {
-      // Упрощенно для малых периодов (линейный рост)
-      Se_T =
-        ag_ratio *
-        g *
-        soil.S_factor *
-        (1 + (T_eff / soil.TB) * (2.5 * eta - 1));
+      Se_5 = ag_ratio * g * soil.S_factor * (1 + (T_eff / soil.TB) * (2.5 - 1));
     }
 
-    // 5. Спектр перемещений SDe(T) или d(dc) (Этап 4-5, Формула 7.15)
-    // d(dc) = Se(T) * (T / 2pi)^2
-    const d_dc_m = Se_T * Math.pow(T_eff / (2 * Math.PI), 2);
+    // 5. SDe (при 5%)
+    const SDe_5 = Se_5 * Math.pow(T_eff / (2 * Math.PI), 2);
+
+    // 6. ddc с учетом демпфирования
+    const d_dc_m = SDe_5 * eta;
     const d_dc_mm = d_dc_m * 1000;
 
-    // 6. Поперечная сила F(dc) при расчетном перемещении (Этап 6)
-    // F(dc) = K(eff) * d(dc)
+    // 7. Fdc
     const F_dc = K_eff * d_dc_m;
 
-    // 7. Характеристическая сила F0 (Этап 7, Формула из В2.8)
-    // F0 = (ξ * π * K(eff) * d(dc)^2) / (2 * (d(dc) - dy))
-    // dy переводим в метры для формулы
+    // 8. F0
     const dy_m = yieldDisp / 1000;
 
     let F_0 = 0;
     if (d_dc_m > dy_m) {
-      F_0 =
-        (xi_fraction * Math.PI * K_eff * Math.pow(d_dc_m, 2)) /
-        (2 * (d_dc_m - dy_m));
+      F_0 = (xi * Math.PI * K_eff * d_dc_m * d_dc_m) / (2 * (d_dc_m - dy_m));
     }
 
-    // 8. Сила текучести Fy (Этап 8)
-    // Fy = F0 + (F(dc) - F0) * (dy / d(dc))
-    // Это точка перехода от упругости к пластичности
+    // 9. Fy
     const F_y = F_0 + (F_dc - F_0) * (dy_m / d_dc_m);
 
-    // 9. Жесткости K1 и K2 (Этап 9)
-    // K1 (упругая) = Fy / dy
+    // 10. K1
     const K_1 = dy_m > 0 ? F_y / dy_m : 0;
 
-    // K2 (пост-упругая/пластическая)
-    // K2 = (F(dc) - F_y) / (d(dc) - dy)
-    // Проверка на случай если d(dc) <= dy (линейная работа)
-    const K_2 = d_dc_m > dy_m ? (F_dc - F_y) / (d_dc_m - dy_m) : K_1;
-
-    // --- Генерация данных для графика (Гистерезисная петля) ---
-    // Строим билинейную модель по точкам: (0,0) -> (dy, Fy) -> (ddc, Fdc) -> разгрузка -> ...
-
-    const hysteresisData = [];
-
-    // Точка 1: Начало (0,0)
-    // Точка 2: Текучесть (+dy, +Fy)
-    // Точка 3: Максимум (+ddc, +Fdc)
-    // Разгрузка идет параллельно K1. F_unloading = Fdc - 2*Fy (примерно, для полной петли)
-    // Точка 4: Пересечение оси сил при обратном ходе (+ddc - 2*Fdc/K1 ?? Нет, проще по геометрии)
-    // Упрощенная петля по 4 ключевым точкам (идеализированная, рис В.2)
-
-    // Верхняя ветвь (нагружение)
-    hysteresisData.push({ x: 0, y: 0, label: 'Start' });
-    hysteresisData.push({ x: yieldDisp, y: F_y, label: 'Yield (+)' });
-    hysteresisData.push({ x: d_dc_mm, y: F_dc, label: 'Max (+)' });
-
-    // Разгрузка (идем вниз параллельно K1 пока не достигнем -Fy уровня пластичности)
-    // Точка начала пластичности в обратную сторону: x = d_dc - 2*(d_dc - F0/K2)...
-    // Проще: строим симметричный параллелограмм
-
-    // Точка пересечения оси Y (при x=0) на обратном ходе = F0
-    hysteresisData.push({ x: 0, y: F_0, label: 'F0 (+)' });
-
-    // Точка начала пластичности (-) : (-dy, -Fy) смещенная на пластическую деформацию?
-    // Нет, идеализированная петля (Рис В.2) симметрична относительно центра, но имеет ширину.
-    // Координаты углов параллелограмма:
-    // 1. (d_dc, F_dc)
-    // 2. (d_dc - 2*dy, F_dc - 2*Fy) -> Если K1 очень большой, это почти вертикально вниз
-    // Строим полный цикл:
+    // 11. K2 (исправлено!)
+    const K_2 = F_dc / d_dc_m - F_0 / d_dc_m;
 
     const loopData = [
-      { x: d_dc_mm, y: F_dc }, // Max positive
-      { x: d_dc_mm - 2 * yieldDisp, y: F_dc - 2 * F_y }, // Start reverse plastic (approx)
-      { x: -d_dc_mm, y: -F_dc }, // Max negative
-      { x: -d_dc_mm + 2 * yieldDisp, y: -F_dc + 2 * F_y }, // Start forward plastic
-      { x: d_dc_mm, y: F_dc }, // Close loop
+      { x: d_dc_mm, y: F_dc },
+      { x: -d_dc_mm, y: -F_dc },
+      { x: d_dc_mm, y: F_dc },
     ];
 
-    // Линия начальной жесткости (для визуализации K1)
     const elasticLine = [
       { x: 0, y: 0 },
       { x: yieldDisp, y: F_y },
     ];
 
-    // Линия эффективной жесткости (Keff)
     const effectiveLine = [
       { x: 0, y: 0 },
       { x: d_dc_mm, y: F_dc },
@@ -177,7 +129,7 @@ const SeismoIsolationCalculator: React.FC = () => {
       K_eff_total,
       K_eff,
       eta,
-      Se_T,
+      Se_T: Se_5,
       d_dc_m,
       d_dc_mm,
       F_dc,

@@ -98,40 +98,48 @@ const SeismoIsolationCalculator: React.FC = () => {
   ];
 
   const exportPDF = async () => {
-    const element = document.getElementById('report');
-    if (!element) return;
+    try {
+      const element = document.getElementById('report');
+      if (!element) {
+        console.error('report not found');
+        return;
+      }
 
-    const canvas = await html2canvas(element, {
-      scale: 2,
-      useCORS: true,
-    });
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+      });
 
-    const imgData = canvas.toDataURL('image/png');
+      const imgData = canvas.toDataURL('image/png');
 
-    const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdf = new jsPDF('p', 'mm', 'a4');
 
-    const imgWidth = 210;
-    const pageHeight = 295;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const imgWidth = 210;
+      const pageHeight = 295;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-    if (imgHeight > pageHeight) {
-      let position = 0;
-      let heightLeft = imgHeight;
+      if (imgHeight > pageHeight) {
+        let position = 0;
+        let heightLeft = imgHeight;
 
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft > 0) {
-        position = -(imgHeight - heightLeft);
-        pdf.addPage();
         pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
         heightLeft -= pageHeight;
-      }
-    } else {
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-    }
 
-    pdf.save('seismic-report.pdf');
+        while (heightLeft > 0) {
+          position = -(imgHeight - heightLeft);
+          pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+          heightLeft -= pageHeight;
+        }
+      } else {
+        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      }
+
+      pdf.save('seismic-report.pdf');
+    } catch (err) {
+      console.error('PDF ERROR:', err);
+    }
   };
 
   return (
@@ -319,7 +327,7 @@ const SeismoIsolationCalculator: React.FC = () => {
         </div>
 
         {/* Правая колонка: Результаты и Графики */}
-        <div id='report' className='xl:col-span-8 space-y-6'>
+        <div className='xl:col-span-8 space-y-6'>
           {/* Блок основных результатов */}
           <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
             <ResultCard
@@ -548,6 +556,38 @@ const SeismoIsolationCalculator: React.FC = () => {
           <li>6. F0 = {results.F_0.toFixed(1)} кН</li>
           <li>7. Fy = {results.F_y.toFixed(1)} кН</li>
         </ul>
+      </div>
+
+      <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
+        <div
+          id='report'
+          style={{
+            all: 'initial',
+            fontFamily: 'Arial, sans-serif',
+            background: '#ffffff',
+            color: '#000000',
+            padding: '20px',
+            width: '800px',
+          }}
+        >
+          <h1>Отчет по сейсмоизоляции</h1>
+
+          <p>Масса: {mass}</p>
+          <p>Количество опор: {isolatorCount}</p>
+          <p>T_eff: {T_eff} сек</p>
+
+          <hr />
+
+          <p>K_eff: {results.K_eff.toFixed(0)} кН/м</p>
+          <p>d_dc: {results.d_dc_mm.toFixed(0)} мм</p>
+          <p>F_dc: {results.F_dc.toFixed(1)} кН</p>
+
+          <hr />
+
+          <p>η: {results.eta.toFixed(3)}</p>
+          <p>F0: {results.F_0.toFixed(1)} кН</p>
+          <p>Fy: {results.F_y.toFixed(1)} кН</p>
+        </div>
       </div>
     </div>
   );

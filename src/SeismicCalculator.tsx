@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Activity,
   Settings,
@@ -16,7 +16,6 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
-  Scatter,
 } from 'recharts';
 
 // --- Типы данных ---
@@ -56,7 +55,7 @@ const SeismoIsolationCalculator: React.FC = () => {
   const results = useMemo(() => {
     const soil = SOIL_TYPES[soilIndex];
     const g = 9.81; // м/с²
-    const ag = ag_ratio * g; // Расчетное ускорение
+    // const ag = ag_ratio * g; // Расчетное ускорение
 
     // 1. Эффективная жесткость системы (Приложение В, Этап 1)
     // K(eff total) = 4 * pi^2 * M / T^2
@@ -486,9 +485,13 @@ const SeismoIsolationCalculator: React.FC = () => {
                     domain={[-results.F_dc * 1.2, results.F_dc * 1.2]}
                   />
                   <Tooltip
-                    formatter={(value: number) => value.toFixed(1)}
-                    labelFormatter={(label: number) =>
-                      `d: ${label.toFixed(1)} мм`
+                    formatter={(value: any) =>
+                      typeof value === 'number' ? value.toFixed(1) : value
+                    }
+                    labelFormatter={(label: any) =>
+                      typeof label === 'number'
+                        ? `d: ${label.toFixed(1)} мм`
+                        : `d: ${label} мм`
                     }
                     contentStyle={{
                       borderRadius: '8px',

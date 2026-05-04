@@ -103,6 +103,7 @@ const SeismoIsolationCalculator: React.FC = () => {
 
     const canvas = await html2canvas(element, {
       scale: 2,
+      useCORS: true,
     });
 
     const imgData = canvas.toDataURL('image/png');
@@ -134,10 +135,7 @@ const SeismoIsolationCalculator: React.FC = () => {
   };
 
   return (
-    <div
-      className='min-h-screen bg-gray-50 text-gray-800 font-sans p-4 md:p-8'
-      id='report'
-    >
+    <div className='min-h-screen bg-gray-50 text-gray-800 font-sans p-4 md:p-8'>
       <div className='max-w-7xl mx-auto grid grid-cols-1 xl:grid-cols-12 gap-6'>
         {/* Хедер */}
         <div className='xl:col-span-12 flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-200'>
@@ -321,7 +319,7 @@ const SeismoIsolationCalculator: React.FC = () => {
         </div>
 
         {/* Правая колонка: Результаты и Графики */}
-        <div className='xl:col-span-8 space-y-6'>
+        <div id='report' className='xl:col-span-8 space-y-6'>
           {/* Блок основных результатов */}
           <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
             <ResultCard
@@ -497,43 +495,6 @@ const SeismoIsolationCalculator: React.FC = () => {
           </div>
         </div>
 
-        <div className='bg-white rounded-2xl border p-6'>
-          <h3 className='font-bold mb-3'>Проверки по СН</h3>
-
-          {results.warnings?.length === 0 ? (
-            <p className='text-green-600'>✔ Все условия выполнены</p>
-          ) : (
-            results.warnings?.map((w: string, i: number) => (
-              <p key={i} className='text-red-500 text-sm'>
-                ⚠ {w}
-              </p>
-            ))
-          )}
-        </div>
-
-        <div className='bg-white rounded-2xl border p-6'>
-          <h3 className='font-bold mb-3'>Ход расчета (Приложение В)</h3>
-
-          <ul className='text-sm space-y-1 font-mono'>
-            <li>1. K_eff = {results.K_eff.toFixed(0)} кН/м</li>
-            <li>2. η = {results.eta.toFixed(3)}</li>
-            <li>3. Se(T) = {results.Se_T.toFixed(2)}</li>
-            <li>
-              4. d ={' '}
-              <span
-                className={`font-mono text-lg ${
-                  results.d_dc_mm > 350 ? 'text-red-500' : 'text-green-600'
-                }`}
-              >
-                {results.d_dc_mm.toFixed(0)} мм
-              </span>
-            </li>
-            <li>5. F = {results.F_dc.toFixed(1)} кН</li>
-            <li>6. F0 = {results.F_0.toFixed(1)} кН</li>
-            <li>7. Fy = {results.F_y.toFixed(1)} кН</li>
-          </ul>
-        </div>
-
         {/* Инфо футер */}
         <div className='xl:col-span-12 mt-4 bg-amber-50 border border-amber-100 rounded-xl p-4 flex items-start gap-3'>
           <Info className='text-amber-600 shrink-0 mt-0.5' size={20} />
@@ -550,6 +511,43 @@ const SeismoIsolationCalculator: React.FC = () => {
             </p>
           </div>
         </div>
+      </div>
+
+      <div className='bg-white rounded-2xl border p-6'>
+        <h3 className='font-bold mb-3'>Проверки по СН</h3>
+
+        {results.warnings?.length === 0 ? (
+          <p className='text-green-600'>✔ Все условия выполнены</p>
+        ) : (
+          results.warnings?.map((w: string, i: number) => (
+            <p key={i} className='text-red-500 text-sm'>
+              ⚠ {w}
+            </p>
+          ))
+        )}
+      </div>
+
+      <div className='bg-white rounded-2xl border p-6'>
+        <h3 className='font-bold mb-3'>Ход расчета (Приложение В)</h3>
+
+        <ul className='text-sm space-y-1 font-mono'>
+          <li>1. K_eff = {results.K_eff.toFixed(0)} кН/м</li>
+          <li>2. η = {results.eta.toFixed(3)}</li>
+          <li>3. Se(T) = {results.Se_T.toFixed(2)}</li>
+          <li>
+            4. d ={' '}
+            <span
+              className={`font-mono text-lg ${
+                results.d_dc_mm > 350 ? 'text-red-500' : 'text-green-600'
+              }`}
+            >
+              {results.d_dc_mm.toFixed(0)} мм
+            </span>
+          </li>
+          <li>5. F = {results.F_dc.toFixed(1)} кН</li>
+          <li>6. F0 = {results.F_0.toFixed(1)} кН</li>
+          <li>7. Fy = {results.F_y.toFixed(1)} кН</li>
+        </ul>
       </div>
     </div>
   );

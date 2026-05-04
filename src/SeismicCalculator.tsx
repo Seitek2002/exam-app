@@ -17,6 +17,10 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
+import { calculateSeismicIsolation } from './utils/seismicCalc';
+
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 // --- Типы данных ---
 
@@ -53,94 +57,15 @@ const SeismoIsolationCalculator: React.FC = () => {
 
   // --- Вычисления (Memoized) ---
   const results = useMemo(() => {
-    const soil = SOIL_TYPES[soilIndex];
-    const g = 9.81;
-
-    const xi = damping / 100;
-
-    // 1. Keff total
-    const K_eff_total = (4 * Math.PI * Math.PI * mass) / (T_eff * T_eff);
-
-    // 2. Keff
-    const K_eff = K_eff_total / isolatorCount;
-
-    // 3. η (правильная формула)
-    const rho = 1 + (0.05 - xi) / (0.05 + 2 * xi - 3 * xi * xi);
-
-    const lambda = (0.05 - xi) / (0.33 + 9 * xi);
-
-    const eta = rho * Math.pow(1 / T_eff, lambda);
-
-    // 4. Se(T) при 5% (η = 1)
-    let Se_5 = 0;
-
-    if (T_eff >= soil.TC) {
-      Se_5 = ag_ratio * g * soil.S_factor * 2.5 * (soil.TC / T_eff);
-    } else if (T_eff >= soil.TB) {
-      Se_5 = ag_ratio * g * soil.S_factor * 2.5;
-    } else {
-      Se_5 = ag_ratio * g * soil.S_factor * (1 + (T_eff / soil.TB) * (2.5 - 1));
-    }
-
-    // 5. SDe (при 5%)
-    const SDe_5 = Se_5 * Math.pow(T_eff / (2 * Math.PI), 2);
-
-    // 6. ddc с учетом демпфирования
-    const d_dc_m = SDe_5 * eta;
-    const d_dc_mm = d_dc_m * 1000;
-
-    // 7. Fdc
-    const F_dc = K_eff * d_dc_m;
-
-    // 8. F0
-    const dy_m = yieldDisp / 1000;
-
-    let F_0 = 0;
-    if (d_dc_m > dy_m) {
-      F_0 = (xi * Math.PI * K_eff * d_dc_m * d_dc_m) / (2 * (d_dc_m - dy_m));
-    }
-
-    // 9. Fy
-    const F_y = F_0 + (F_dc - F_0) * (dy_m / d_dc_m);
-
-    // 10. K1
-    const K_1 = dy_m > 0 ? F_y / dy_m : 0;
-
-    // 11. K2 (исправлено!)
-    const K_2 = F_dc / d_dc_m - F_0 / d_dc_m;
-
-    const loopData = [
-      { x: d_dc_mm, y: F_dc },
-      { x: -d_dc_mm, y: -F_dc },
-      { x: d_dc_mm, y: F_dc },
-    ];
-
-    const elasticLine = [
-      { x: 0, y: 0 },
-      { x: yieldDisp, y: F_y },
-    ];
-
-    const effectiveLine = [
-      { x: 0, y: 0 },
-      { x: d_dc_mm, y: F_dc },
-    ];
-
-    return {
-      K_eff_total,
-      K_eff,
-      eta,
-      Se_T: Se_5,
-      d_dc_m,
-      d_dc_mm,
-      F_dc,
-      F_0,
-      F_y,
-      K_1,
-      K_2,
-      loopData,
-      elasticLine,
-      effectiveLine,
-    };
+    return calculateSeismicIsolation({
+      mass,
+      isolatorCount,
+      T_eff,
+      damping,
+      yieldDisp,
+      ag_ratio,
+      soil: SOIL_TYPES[soilIndex],
+    });
   }, [mass, isolatorCount, T_eff, damping, yieldDisp, ag_ratio, soilIndex]);
 
   // Сброс к значениям примера
@@ -154,8 +79,65 @@ const SeismoIsolationCalculator: React.FC = () => {
     setSoilIndex(2);
   };
 
+  const loopData = [
+    { x: -results.d_dc_mm, y: -results.F_dc },
+    { x: -yieldDisp, y: -results.F_y },
+    { x: yieldDisp, y: results.F_y },
+    { x: results.d_dc_mm, y: results.F_dc },
+    { x: -results.d_dc_mm, y: -results.F_dc },
+  ];
+
+  const elasticLine = [
+    { x: 0, y: 0 },
+    { x: yieldDisp, y: results.F_y },
+  ];
+
+  const effectiveLine = [
+    { x: 0, y: 0 },
+    { x: results.d_dc_mm, y: results.F_dc },
+  ];
+
+  const exportPDF = async () => {
+    const element = document.getElementById('report');
+    if (!element) return;
+
+    const canvas = await html2canvas(element, {
+      scale: 2,
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+
+    const pdf = new jsPDF('p', 'mm', 'a4');
+
+    const imgWidth = 210;
+    const pageHeight = 295;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    if (imgHeight > pageHeight) {
+      let position = 0;
+      let heightLeft = imgHeight;
+
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = -(imgHeight - heightLeft);
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+    } else {
+      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+    }
+
+    pdf.save('seismic-report.pdf');
+  };
+
   return (
-    <div className='min-h-screen bg-gray-50 text-gray-800 font-sans p-4 md:p-8'>
+    <div
+      className='min-h-screen bg-gray-50 text-gray-800 font-sans p-4 md:p-8'
+      id='report'
+    >
       <div className='max-w-7xl mx-auto grid grid-cols-1 xl:grid-cols-12 gap-6'>
         {/* Хедер */}
         <div className='xl:col-span-12 flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-200'>
@@ -175,6 +157,12 @@ const SeismoIsolationCalculator: React.FC = () => {
           >
             <RotateCcw size={16} />
             Загрузить Пример В1
+          </button>
+          <button
+            onClick={exportPDF}
+            className='px-4 py-2 bg-green-600 text-white rounded-lg'
+          >
+            Скачать PDF
           </button>
         </div>
 
@@ -456,7 +444,7 @@ const SeismoIsolationCalculator: React.FC = () => {
 
                   {/* Гистерезисная петля */}
                   <Line
-                    data={results.loopData}
+                    data={loopData}
                     type='linear'
                     dataKey='y'
                     stroke='#2563eb'
@@ -468,7 +456,7 @@ const SeismoIsolationCalculator: React.FC = () => {
 
                   {/* Линия K(eff) */}
                   <Line
-                    data={results.effectiveLine}
+                    data={effectiveLine}
                     type='linear'
                     dataKey='y'
                     stroke='#10b981'
@@ -480,7 +468,7 @@ const SeismoIsolationCalculator: React.FC = () => {
 
                   {/* Линия K(1) - Начальная жесткость */}
                   <Line
-                    data={results.elasticLine}
+                    data={elasticLine}
                     type='linear'
                     dataKey='y'
                     stroke='#f59e0b'
@@ -507,6 +495,43 @@ const SeismoIsolationCalculator: React.FC = () => {
               </div>
             </div>
           </div>
+        </div>
+
+        <div className='bg-white rounded-2xl border p-6'>
+          <h3 className='font-bold mb-3'>Проверки по СН</h3>
+
+          {results.warnings?.length === 0 ? (
+            <p className='text-green-600'>✔ Все условия выполнены</p>
+          ) : (
+            results.warnings?.map((w: string, i: number) => (
+              <p key={i} className='text-red-500 text-sm'>
+                ⚠ {w}
+              </p>
+            ))
+          )}
+        </div>
+
+        <div className='bg-white rounded-2xl border p-6'>
+          <h3 className='font-bold mb-3'>Ход расчета (Приложение В)</h3>
+
+          <ul className='text-sm space-y-1 font-mono'>
+            <li>1. K_eff = {results.K_eff.toFixed(0)} кН/м</li>
+            <li>2. η = {results.eta.toFixed(3)}</li>
+            <li>3. Se(T) = {results.Se_T.toFixed(2)}</li>
+            <li>
+              4. d ={' '}
+              <span
+                className={`font-mono text-lg ${
+                  results.d_dc_mm > 350 ? 'text-red-500' : 'text-green-600'
+                }`}
+              >
+                {results.d_dc_mm.toFixed(0)} мм
+              </span>
+            </li>
+            <li>5. F = {results.F_dc.toFixed(1)} кН</li>
+            <li>6. F0 = {results.F_0.toFixed(1)} кН</li>
+            <li>7. Fy = {results.F_y.toFixed(1)} кН</li>
+          </ul>
         </div>
 
         {/* Инфо футер */}

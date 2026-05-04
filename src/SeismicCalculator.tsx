@@ -557,6 +557,7 @@ const SeismoIsolationCalculator: React.FC = () => {
           <li>7. Fy = {results.F_y.toFixed(1)} кН</li>
         </ul>
       </div>
+      
 
       <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
         <div
